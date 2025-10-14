@@ -84,6 +84,20 @@ jujuchat/
         └── server.py      # Core chat API & RCS webhooks
 ```
 
+## Quick Start
+
+### Prerequisites
+
+1. **Python 3.10+** installed
+2. **Claude Code CLI** installed and accessible:
+   ```bash
+   # Check Claude Code installation
+   claude --version
+   ```
+   If not installed, follow the [official installation guide](https://docs.anthropic.com/en/docs/claude-code).
+
+3. **Node.js** (required for Claude Code)
+
 ## Installation
 
 ### Standalone Development
@@ -194,6 +208,145 @@ cors:
   allow_origins: ["*"]
   allow_methods: ["GET", "POST"]
 ```
+
+## Slack Bot Setup Guide
+
+### 1. Create Slack App
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) and create a new app "From scratch"
+2. Choose a name (e.g., "Juju Assistant") and select your workspace
+3. Note your **App ID** for reference
+
+### 2. Enable Socket Mode
+
+1. Navigate to **Socket Mode** in the left sidebar
+2. Enable Socket Mode
+3. Generate an **App-Level Token** with `connections:write` scope
+4. Save this token as your `SLACK_APP_TOKEN`
+
+### 3. Configure Bot Permissions
+
+Navigate to **OAuth & Permissions** and add these **Bot Token Scopes**:
+
+**Required for basic functionality:**
+- `app_mentions:read` - Read messages that mention the bot
+- `chat:write` - Send messages as the bot
+- `im:history` - View direct message history
+- `im:read` - View direct message info
+- `im:write` - Start direct messages
+
+**Required for thread context (highly recommended):**
+- `channels:history` - View message history in public channels
+- `groups:history` - View message history in private channels
+- `groups:read` - Access private channel information
+- `users:read` - Get user display names for better context
+
+**Required for file attachments:**
+- `files:read` - Read file information
+- `files:write` - Upload files to Slack
+
+### 4. Enable App Home
+
+Navigate to **App Home** and configure:
+
+1. **Enable Messages Tab**: Turn on "Allow users to send Slash commands and messages from the messages tab"
+2. **Always Show My Bot as Online**: Enable this option
+3. Set your bot's display name and default username
+
+**Important**: Without this step, users will see "Sending messages to this app has been turned off" when trying to DM the bot.
+
+### 5. Subscribe to Events
+
+Navigate to **Event Subscriptions** and:
+
+1. Enable Events
+2. Subscribe to these **Bot Events**:
+   - `app_mention` - When bot is @mentioned in channels
+   - `message.im` - Direct messages to the bot
+
+Socket Mode handles event delivery, so no Request URL is needed.
+
+### 6. Install to Workspace
+
+1. Navigate to **OAuth & Permissions**
+2. Click **Install to Workspace**
+3. Review and authorize the permissions
+4. Copy your **Bot User OAuth Token** (starts with `xoxb-`)
+5. Save this as your `SLACK_BOT_TOKEN`
+
+### 7. Set Environment Variables
+
+Create a `.env` file or export environment variables:
+
+```bash
+export SLACK_BOT_TOKEN="xoxb-your-bot-token-here"
+export SLACK_APP_TOKEN="xapp-your-app-token-here"
+```
+
+Or add to your `slackbot_config.yaml`:
+
+```yaml
+slack:
+  bot_token: "${SLACK_BOT_TOKEN}"
+  app_token: "${SLACK_APP_TOKEN}"
+```
+
+### 8. Test the Connection
+
+```bash
+# Test basic Slack connectivity
+UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv run python -c "
+from slack_bolt import App
+import os
+
+app = App(token=os.getenv('SLACK_BOT_TOKEN'))
+result = app.client.auth_test()
+print(f'✅ Connected as: {result[\"user\"]}')
+"
+```
+
+### 9. Run the Bot
+
+```bash
+UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv run jujuchat-slack /path/to/your/project
+```
+
+You should see:
+```
+🚀 Starting Slack Claude Bot...
+✅ Bot user ID: U123456789
+✅ Bot is ready to receive messages!
+📱 Available in:
+   • Direct messages
+   • Explicit channel mentions (@bot_name)
+   • Threaded messages with explicit mentions
+```
+
+### 10. Test in Slack
+
+1. **Direct Message Test**: Open a DM with your bot and send "Hello!"
+2. **Channel Test**: Invite the bot to a channel (`/invite @bot-name`) and mention it: `@bot-name help`
+3. **Thread Test**: Reply in a thread mentioning the bot
+
+### Troubleshooting
+
+**"Sending messages to this app has been turned off"**
+- Go to **App Home** → Enable "Allow users to send Slash commands and messages from the messages tab"
+- Reload Slack (`Cmd+R` on Mac, `Ctrl+R` on Windows)
+
+**"Missing scope: channels:history" or "Missing scope: groups:history"**
+- Add the missing scopes in **OAuth & Permissions**
+- **Reinstall the app** to your workspace to activate new permissions
+
+**Thread context not working**
+- Ensure you have `channels:history`, `groups:history`, `groups:read`, and `users:read` scopes
+- Reinstall the app after adding scopes
+
+**Bot not responding**
+- Check bot is running and shows "✅ Bot is ready to receive messages!"
+- Verify Socket Mode is enabled
+- Check logs for errors
+- Ensure bot is invited to the channel (for channel mentions)
 
 ## Unified Logging System
 
