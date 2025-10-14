@@ -1,92 +1,106 @@
 # JujuChat
 
-Unified chat integration module for the Juju system, consolidating Slack, RCS, and HTTP chat interfaces.
+**Unified chat integration module for the Juju personal AI assistant system**
 
-## Package Structure
+JujuChat provides a flexible, adapter-based architecture for integrating Claude AI across multiple chat platforms. It features a shared core backend powered by the Claude Agent SDK, with platform-specific adapters for Slack, RCS (via Twilio), and a generic HTTP API for future integrations.
 
-JujuChat is a Python package following standard conventions:
-- **Package Name**: `jujuchat` (for pip/uv)
-- **Import Name**: `jujuchat` (in Python code)
-- **Virtual Environment**: `~/.venv/jujuchat` (for isolated development)
+## Features
 
-The package is structured as:
-```
-JujuChat/
-├── pyproject.toml          # Package configuration
-├── src/
-│   └── jujuchat/          # Importable package
-│       ├── __init__.py
-│       ├── core/          # Shared backend
-│       ├── adapters/      # Platform integrations
-│       ├── servers/       # HTTP servers
-│       └── utils/         # Shared utilities
-└── tests/
-```
+### Core Backend
+- **Persistent Sessions**: Maintains conversation context across multiple interactions
+- **Streaming Responses**: Real-time message streaming for better user experience
+- **Configuration-Driven**: Flexible per-session configuration for different use cases
+- **MCP Integration**: Full support for Model Context Protocol servers
+- **Tool Management**: Granular control over allowed/disallowed tools
+- **Comprehensive Logging**: Two-layer logging system for both Claude interactions and adapter operations
+
+### Platform Adapters
+
+#### Slack Adapter (Most Feature-Rich)
+The Slack adapter is the most mature and feature-complete implementation:
+
+- **Direct Integration**: Native Python integration with core backend for optimal performance
+- **Socket Mode**: Real-time bidirectional communication with Slack
+- **Advanced Features**:
+  - Thread context management (automatically includes conversation history)
+  - Streaming message updates (messages update in real-time as Claude responds)
+  - File attachments (upload/download with configurable size and type restrictions)
+  - User name resolution with caching
+  - Multiple interaction modes: DMs, channel mentions, threaded conversations
+  - Bot commands: `!help`, `!reset`, `!interrupt`, `!status`, `!config`, `!history`, `!compact`, `!auto-compact`, `!reload-config`, `!schedule`, `!sendfile`
+  - Scheduled messages support
+  - Automatic session cleanup
+- **Configuration**: YAML-based with channel-specific settings and MCP permissions
+
+#### RCS Adapter (Production-Ready)
+The RCS adapter provides secure messaging via Twilio:
+
+- **Security-First Design**: Isolated HTTP process for handling untrusted webhooks
+- **Twilio Integration**: Full webhook validation and media handling
+- **Key Features**:
+  - Webhook signature validation
+  - Media attachment support (images, videos, documents)
+  - Rate limiting middleware
+  - Message deduplication
+  - Background message processing
+  - Host header validation
+- **Configuration**: Environment-based (.env) for easy deployment
+
+#### HTTP Server Adapter
+**Note**: The HTTP server adapter is currently not up to date compared to the Slack adapter. It provides basic functionality but lacks many advanced features like streaming updates, comprehensive file handling, and thread management.
+
+- **Generic Chat API**: RESTful endpoints for chat interactions
+- **RCS Webhook Support**: Dedicated endpoints for Twilio webhooks
+- **Future-Ready**: Designed for iOS and web client integration
+- **FastAPI-Based**: Modern async Python web framework with automatic OpenAPI docs
 
 ## Architecture
 
 ```
-JujuChat/
-├── core/           # Shared Claude backend & unified logging
-│   ├── core.py         # ChatBackend (Claude integration)
-│   ├── config.py       # Configuration management
-│   └── logging.py      # Unified logging system
-├── adapters/       # Chat platform integrations
-│   ├── slack/      # Slack bot (direct Python integration)
-│   └── rcs/        # RCS adapter (HTTP client for security)
-├── servers/
-│   └── http/       # HTTP API server
-└── utils/          # Shared utilities
+jujuchat/
+├── core/                    # Shared Claude backend
+│   ├── core.py             # ChatBackend (main Claude integration)
+│   ├── config.py           # Configuration protocols
+│   ├── logging.py          # Two-layer logging system
+│   ├── models.py           # Data models
+│   └── history.py          # Conversation history management
+│
+├── adapters/               # Platform-specific integrations
+│   ├── slack/             # Slack bot (most feature-rich)
+│   │   ├── bot.py         # Main application & event handlers
+│   │   ├── message_processor.py  # Message handling & commands
+│   │   ├── streaming.py   # Real-time message updates
+│   │   ├── attachments.py # File upload/download
+│   │   └── config.py      # YAML configuration management
+│   │
+│   └── rcs/               # RCS messaging via Twilio
+│       ├── adapter.py     # FastAPI webhook handler
+│       ├── media_handler.py      # Media attachment processing
+│       ├── twilio_validator.py   # Signature validation
+│       └── config.py      # Environment-based configuration
+│
+└── servers/               # HTTP API servers
+    └── http/              # Unified HTTP server (not fully up to date)
+        └── server.py      # Core chat API & RCS webhooks
 ```
 
-## Components
+## Installation
 
-### Core Backend
-- `ChatBackend`: Manages Claude Code subprocess communication (renamed from ClaudeBackend)
-- `ConfigProvider`: Configuration management protocol
-- `CoreLogger`: Session-based logging for Claude API interactions
-- `AdapterLogger`: Platform-specific logging for adapters
-- Session management and persistent conversation history
-
-### Adapters
-
-#### Slack Adapter
-- Direct Python integration with core backend
-- Socket Mode for real-time messaging
-- Thread context and conversation management
-- Commands: `!help`, `!reset`, `!status`, `!history`
-
-#### RCS Adapter  
-- Twilio webhook handler for RCS messaging
-- HTTP client to core backend (security isolation)
-- Media attachment support
-- Signature validation and rate limiting
-
-### HTTP Server
-- Unified server for RCS webhooks
-- Generic design for future iOS/web client support
-- FastAPI with CORS and validation
-
-## Usage
-
-### Standalone Module Development
+### Standalone Development
 
 ```bash
-cd /Users/zhiyufu/Dropbox/Juju/modules/JujuChat
+cd /path/to/JujuChat
 
 # Set up isolated environment
 UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv sync
 
 # Run services
-UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv run python -m jujuchat.adapters.slack
-UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv run python -m jujuchat.adapters.rcs
-UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv run python -m jujuchat.servers.http --config rcs_config.yaml
-
-# Run tests
-UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv run pytest
+UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv run jujuchat-slack
+UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv run jujuchat-rcs
+UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv run jujuchat-http --config server_config.yaml
 ```
 
-### Integration with Master Juju Environment
+### Integration with Juju System
 
 ```bash
 # From the Juju root directory
@@ -94,116 +108,242 @@ cd ~/Dropbox/Juju
 export UV_PROJECT_ENVIRONMENT="$HOME/.venv/juju"
 uv sync  # Installs jujuchat in editable mode
 
-# Use the juju CLI wrapper
+# Use the juju CLI
 juju start --service jujuchat-slack
 juju start --service jujuchat-rcs
-juju start --service jujuchat-http
-
-# Check status
 juju status
+```
+
+## Configuration
+
+### Slack Adapter
+Configuration file: `slackbot_config.yaml`
+
+```yaml
+slack:
+  bot_token: xoxb-...
+  app_token: xapp-...
+
+app:
+  project_root: /path/to/project
+  system_prompt: "You are a helpful assistant..."
+  claude_model: claude-sonnet-4-5-20250929
+
+  # MCP configuration
+  mcp_config_path: .claude/settings.local.json
+
+  # Tool permissions
+  permissions:
+    mode: default  # default, plan, acceptEdits, bypassPermissions
+    tools: [Read, Write, Edit, Bash, Grep, Glob]
+    mcp:
+      obsidian:
+        - list-active-file-info
+        - search-daily-notes
+
+  # Attachment settings
+  attachments_max_size_mb: 25
+  attachments_allowed_types: "image/png,image/jpeg,application/pdf"
+
+# Channel-specific overrides
+channels:
+  C12345:
+    system_prompt: "Custom prompt for this channel"
+    claude_model: claude-opus-4-20250514
+
+# Scheduled messages (optional)
+scheduled_messages:
+  daily_standup:
+    time: "0 9 * * 1-5"  # 9 AM on weekdays (Mon-Fri)
+    channel: C12345
+    prompt: "Generate a brief daily standup summary based on recent activity"
+    enabled: true
+    timezone: "America/New_York"
+
+  weekly_report:
+    time: "0 17 * * 5"  # 5 PM every Friday
+    channel: C12345
+    prompt: "Create a weekly progress report summarizing this week's work"
+    enabled: true
+```
+
+### RCS Adapter
+Configuration file: `.env`
+
+```env
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+TWILIO_MESSAGING_SERVICE_SID=MG...
+TWILIO_WEBHOOK_SECRET_PATH=your-secret-path
+
+CLAUDE_HTTP_URL=http://localhost:8811
+PUBLIC_HOSTNAME=rcs.yourdomain.com
+
+ATTACHMENTS_DIR=./attachments
+ADAPTER_MAX_BODY_BYTES=10485760
+ADAPTER_RATE_LIMIT_RPS=2.0
+```
+
+### HTTP Server
+Configuration file: `server_config.yaml`
+
+```yaml
+host: 0.0.0.0
+port: 8811
+cors:
+  allow_origins: ["*"]
+  allow_methods: ["GET", "POST"]
 ```
 
 ## Unified Logging System
 
-JujuChat implements a two-layer logging architecture:
+JujuChat implements a sophisticated two-layer logging architecture:
 
-### Architecture Design
+### Layer 1: Core Logging
+Session-based logging for Claude API interactions (shared across all adapters):
 
-#### Layer 1: Core Logging (`CoreLogger`)
-Session-based logging for Claude API interactions, shared across all adapters:
 ```
 logs/jujuchat-core/{session_id}/
 ├── claude_raw_YYYY-MM-DD.jsonl       # Raw Claude API requests/responses
-├── conversations_YYYY-MM-DD.jsonl    # Processed conversation summaries  
-└── errors_YYYY-MM-DD.jsonl           # Session-specific errors
+├── conversations_YYYY-MM-DD.jsonl    # Conversation summaries
+└── errors_YYYY-MM-DD.jsonl           # Errors
 ```
 
-#### Layer 2: Adapter Logging (`AdapterLogger`) 
+### Layer 2: Adapter Logging
 Platform-specific operational logging:
+
 ```
 logs/jujuchat-{adapter}/
-├── operations_YYYY-MM-DD.log         # Adapter operations (startup, config, etc.)
-└── events_YYYY-MM-DD.log             # Platform events (webhooks, messages, etc.)
+├── operations_YYYY-MM-DD.log         # Startup, config, operations
+└── events_YYYY-MM-DD.log             # Platform events (webhooks, messages)
 ```
 
 ### Session ID Format
-Standardized session identifiers: `{adapter}_{sanitized_identifier}`
 - Slack: `slack_D098GMJR48H` (channel ID)
-- RCS: `rcs_15551234567` (phone number, sanitized)
-- HTTP: `http_{session_token}` (generated session)
+- RCS: `rcs_15551234567` (sanitized phone number)
+- HTTP: `http_{session_token}` (generated token)
 
-### Log Content Examples
+## Usage Examples
 
-**Core Logs (claude_raw_YYYY-MM-DD.jsonl):**
-```json
-{"timestamp": "2025-09-14T17:08:40.825", "session": "slack_D098GMJR48H", "direction": "request", "message": "Hello"}
-{"timestamp": "2025-09-14T17:08:43.426", "session": "slack_D098GMJR48H", "direction": "response", "event": {...}}
+### Slack Bot Commands
+
+```
+# Direct message to bot
+Hello, can you help me?
+
+# Channel mention
+@juju what's the weather like?
+
+# Thread reply with context
+@juju can you summarize this discussion?
+
+# Bot commands
+!help                      # Show available commands
+!reset                     # Reset conversation history
+!interrupt                 # Interrupt a long-running response
+!status                    # Show session status and statistics
+!config                    # Show channel configuration
+!history [N]               # Show last N messages (default: 5, max: 20)
+!compact                   # Compact the stored conversation history
+!auto-compact [on|off]     # Manage automatic history compaction
+!reload-config             # Reload configuration from file
+!schedule                  # Show scheduled messages status
+!schedule enable <name>    # Enable a scheduled message
+!schedule disable <name>   # Disable a scheduled message
+!sendfile <path ...>       # Upload file(s) from session attachments
 ```
 
-**Adapter Logs (events_YYYY-MM-DD.log):**
-```json
-{"timestamp": "2025-09-14T17:08:40.825", "adapter": "slack", "level": "INFO", "event_type": "message_received", "event_data": {...}}
+### HTTP API
+
+```bash
+# Send a chat message
+curl -X POST http://localhost:8811/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Hello, Claude!",
+    "session_id": "http_user123"
+  }'
+
+# Upload an attachment
+curl -X POST http://localhost:8811/attachments \
+  -F "file=@document.pdf" \
+  -F "session_id=http_user123"
+
+# Health check
+curl http://localhost:8811/health
 ```
 
-### Migration from Legacy Logging
-- **Deprecated**: `slackbot_logs/` directory (old Slack adapter logging)
-- **Migrated**: All logging now uses centralized `logs/` directory
-- **Backward Compatible**: Existing `BotLogger` API maintained for compatibility
+### Python API
 
-## Configuration
+```python
+from jujuchat.core import ChatBackend, ConfigProvider
 
-Each adapter uses its own configuration system:
-- **Slack**: `slackbot_config.yaml` (existing format)
-- **RCS**: `.env` file with Twilio credentials
-- **HTTP**: Generic YAML config for server settings
+# Implement your config provider
+class MyConfigProvider(ConfigProvider):
+    def get_session_config(self, session_id: str):
+        return MySessionConfig()
+
+# Create backend
+backend = ChatBackend(MyConfigProvider())
+
+# Send message
+response = await backend.send_message_with_session(
+    message="Hello, Claude!",
+    session_id="my_session"
+)
+```
 
 ## Security
 
 ### RCS Security Model
-- RCS adapter runs as separate process handling untrusted webhooks
-- HTTP boundary provides isolation between internet-facing RCS and core backend
-- No direct Python import to core (maintains security isolation)
+- **Process Isolation**: RCS adapter runs as a separate process
+- **HTTP Boundary**: Isolates internet-facing webhooks from core backend
+- **Signature Validation**: Validates all Twilio webhook signatures
+- **Host Validation**: Ensures requests come from expected domains
+- **Rate Limiting**: Prevents abuse via IP-based rate limiting
+- **Size Limits**: Enforces maximum payload sizes
 
-### Slack Security Model  
-- Slack adapter uses direct Python import (trusted environment)
-- Socket Mode connections validated by Slack infrastructure
-- No internet-exposed endpoints
+### Slack Security Model
+- **Trusted Environment**: Direct Python integration (no external exposure)
+- **Socket Mode**: Outbound connections only, validated by Slack
+- **File Validation**: Size and type restrictions on attachments
+- **No Exposed Endpoints**: No internet-facing HTTP endpoints
 
 ## Development
 
-### Standalone Development
-```bash
-cd /Users/zhiyufu/Dropbox/Juju/modules/JujuChat
+For detailed development guidelines, environment setup, testing procedures, and architecture details, see [AGENTS.md](AGENTS.md).
 
-# Install dependencies in isolated environment
+Quick start for development:
+
+```bash
+# Clone and setup
+cd /path/to/JujuChat
 UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv sync
 
 # Run tests
 UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv run pytest
 
-# Development with auto-reload
+# Run with auto-reload (development)
 UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv run uvicorn jujuchat.servers.http:app --reload
 ```
 
-### Integration with Master Environment
-```bash
-# From the Juju root directory
-cd ~/Dropbox/Juju
-export UV_PROJECT_ENVIRONMENT="$HOME/.venv/juju"
+## Migration Notes
 
-# Resync after module changes
-uv sync
-
-# Run services via juju CLI
-juju start --all
-juju logs --service jujuchat-slack
-```
-
-## Migration
-
-This module consolidates the previous separate modules:
+JujuChat consolidates several previous modules:
 - `claude_backend` → `jujuchat.core`
-- `slackbot` → `jujuchat.adapters.slack`  
+- `slackbot` → `jujuchat.adapters.slack`
 - `rcs_adapter` → `jujuchat.adapters.rcs`
 
-See `JujuChat-Migration-Tracker.md` for migration progress and details.
+See `JujuChat-Migration-Tracker.md` for detailed migration progress.
+
+## Known Limitations
+
+- **HTTP Server Adapter**: Not fully up to date with Slack adapter features. Missing streaming updates, advanced file handling, and comprehensive thread management. The Slack adapter is recommended as the reference implementation for new features.
+
+## License
+
+Part of the Juju personal AI assistant system. For internal use.
+
+## Support
+
+For issues, questions, or feature requests, please contact the Juju system maintainers or refer to the project documentation in the main Juju repository.
