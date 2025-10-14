@@ -2,6 +2,8 @@
 
 **Unified chat integration module for the Juju personal AI assistant system**
 
+> ⚠️ **Note**: This is a vibe-coded project for personal use. Many features can be buggy. Use at your own risk.
+
 JujuChat provides a flexible, adapter-based architecture for integrating Claude AI across multiple chat platforms. It features a shared core backend powered by the Claude Agent SDK, with platform-specific adapters for Slack, RCS (via Twilio), and a generic HTTP API for future integrations.
 
 ## Features
@@ -479,15 +481,6 @@ UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv run pytest
 # Run with auto-reload (development)
 UV_PROJECT_ENVIRONMENT=~/.venv/jujuchat uv run uvicorn jujuchat.servers.http:app --reload
 ```
-
-## Migration Notes
-
-JujuChat consolidates several previous modules:
-- `claude_backend` → `jujuchat.core`
-- `slackbot` → `jujuchat.adapters.slack`
-- `rcs_adapter` → `jujuchat.adapters.rcs`
-
-See `JujuChat-Migration-Tracker.md` for detailed migration progress.
 
 ## Known Limitations
 
