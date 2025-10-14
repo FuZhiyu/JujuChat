@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jujuchat"
+version = "0.1.0"
+description = "Unified chat integration module for Juju system"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # Core backend dependencies
+    "aiofiles>=23.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0.0",
+    "httpx>=0.28.1",
+    "python-multipart>=0.0.20",
+    "cachetools>=5.0.0",
+    "claude-agent-sdk>=0.1.0",
+    
+    # Slack adapter dependencies
+    "slack-bolt>=1.20.1",
+    "slack-sdk>=3.33.4",
+    "python-dotenv>=1.0.1",
+    "aiohttp>=3.9.0",
+    
+    # RCS adapter dependencies
+    "twilio>=8.10.0",
+    "pydantic-settings>=2.1.0",
+    "typer>=0.9.0",
+    
+    # Testing dependencies
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.3",
+    "pytest-asyncio>=0.21.1", 
+    "pytest-mock>=3.12.0",
+]
+
+[project.scripts]
+jujuchat-slack = "jujuchat.adapters.slack.__main__:main"
+jujuchat-rcs = "jujuchat.adapters.rcs.__main__:main"
+jujuchat-http = "jujuchat.servers.http.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jujuchat"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests", 
+    "/README.md",
+]
