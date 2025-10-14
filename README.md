@@ -1,8 +1,8 @@
 # JujuChat
 
-**Unified chat integration module for the Juju personal AI assistant system**
+**Unified chat integration module for the personal AI assistant system**
 
-> ⚠️ **Note**: This is a vibe-coded project for personal use. Many features can be buggy. Use at your own risk.
+> ⚠️ **Note**: This is a completely vibe-coded project for my personal use. I did not write a single line of code here. Most functions work well for my purpose, but many features can be buggy. Use at your own risk. 
 
 JujuChat provides a flexible, adapter-based architecture for integrating Claude AI across multiple chat platforms. It features a shared core backend powered by the Claude Agent SDK, with platform-specific adapters for Slack, RCS (via Twilio), and a generic HTTP API for future integrations.
 
