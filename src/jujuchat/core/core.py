@@ -22,6 +22,12 @@ from claude_agent_sdk import (
 )
 
 from .config import ConfigProvider
+from .file_operations import (
+    FileUploadHandler,
+    FileUploadResult,
+    UnsupportedAdapterError,
+)
+from .mcp_tools import create_file_operations_mcp_server
 
 
 logger = logging.getLogger(__name__)
@@ -65,6 +71,9 @@ class ChatBackend:
         self._global_lock = asyncio.Lock()
         self._sessions: Dict[str, SessionState] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
+        self._upload_handlers: Dict[str, FileUploadHandler] = {}
+        # Per-session metadata (e.g., Slack thread_ts)
+        self._session_meta: Dict[str, Dict[str, Any]] = {}
 
     async def send_message_with_session(
         self,
@@ -230,6 +239,106 @@ class ChatBackend:
     def get_active_sessions(self) -> list[str]:
         return list(self._sessions.keys())
 
+    def register_upload_handler(
+        self, adapter_prefix: str, handler: FileUploadHandler
+    ) -> None:
+        """Register a file upload handler for an adapter.
+
+        Args:
+            adapter_prefix: Adapter prefix (e.g., 'slack', 'rcs', 'http')
+            handler: Upload handler implementation for this adapter
+        """
+        self._upload_handlers[adapter_prefix.lower()] = handler
+        logger.info("Registered upload handler for adapter: %s", adapter_prefix)
+
+    def update_session_metadata(self, session_id: str, **kwargs) -> None:
+        """Update arbitrary metadata for a session (e.g., Slack thread_ts)."""
+        meta = self._session_meta.get(session_id)
+        if not meta:
+            meta = {}
+            self._session_meta[session_id] = meta
+        for k, v in kwargs.items():
+            if v is not None:
+                meta[k] = v
+
+    def get_session_metadata(self, session_id: str) -> Dict[str, Any]:
+        """Get a shallow copy of session metadata."""
+        meta = self._session_meta.get(session_id) or {}
+        return dict(meta)
+
+    async def upload_file(
+        self,
+        session_id: str,
+        file_path: str,
+        *,
+        title: Optional[str] = None,
+        comment: Optional[str] = None,
+        **kwargs
+    ) -> FileUploadResult:
+        """Upload a file for a session using the appropriate adapter handler.
+
+        This is the unified interface for file uploads that routes to the
+        appropriate platform-specific implementation based on session ID.
+
+        Args:
+            session_id: Session identifier (e.g., 'slack_D098GMJR48H')
+            file_path: Path to file (validated by adapter handler)
+            title: Optional title/caption for the file
+            comment: Optional comment/message to include with upload
+            **kwargs: Platform-specific options
+
+        Returns:
+            FileUploadResult with upload status and details
+
+        Raises:
+            UnsupportedAdapterError: If no handler registered for this adapter
+            ValueError: If file validation fails
+            RuntimeError: If upload fails
+
+        Example:
+            >>> backend = ChatBackend(config_provider)
+            >>> result = await backend.upload_file(
+            ...     "slack_D098GMJR48H",
+            ...     "report.pdf",
+            ...     title="Monthly Report"
+            ... )
+            >>> if result.success:
+            ...     print(f"Uploaded: {result.message}")
+        """
+        # Extract adapter prefix from session_id
+        adapter_prefix = session_id.split("_")[0].lower()
+
+        # Find the handler
+        handler = self._upload_handlers.get(adapter_prefix)
+        if not handler:
+            raise UnsupportedAdapterError(
+                f"No upload handler registered for adapter '{adapter_prefix}'. "
+                f"Available adapters: {', '.join(self._upload_handlers.keys())}"
+            )
+
+        # Delegate to the handler
+        logger.info(
+            "Routing file upload to %s handler",
+            adapter_prefix,
+            extra={
+                "session_id": session_id,
+                "file_path": file_path,
+            }
+        )
+        # Inject adapter-specific defaults from session metadata
+        # For Slack, if 'thread_ts' not provided, use the last known thread_ts
+        meta = self.get_session_metadata(session_id)
+        if "thread_ts" not in kwargs and "thread_ts" in meta:
+            kwargs["thread_ts"] = meta["thread_ts"]
+
+        return await handler.upload_file(
+            session_id=session_id,
+            file_path=file_path,
+            title=title,
+            comment=comment,
+            **kwargs
+        )
+
     async def _get_or_create_session(self, session_id: str, cfg) -> SessionState:
         signature = self._config_signature(cfg)
         existing = self._sessions.get(session_id)
@@ -242,7 +351,7 @@ class ChatBackend:
         return await self._create_session(session_id, cfg, signature)
 
     async def _create_session(self, session_id: str, cfg, signature: str) -> SessionState:
-        options = self._build_agent_options(cfg)
+        options = self._build_agent_options(cfg, session_id)
         client = ClaudeSDKClient(options=options)
 
         try:
@@ -263,7 +372,7 @@ class ChatBackend:
         self._sessions.pop(session_id, None)
         logger.info("Tore down Claude session %s", session_id)
 
-    def _build_agent_options(self, cfg) -> ClaudeAgentOptions:
+    def _build_agent_options(self, cfg, session_id: str) -> ClaudeAgentOptions:
         options = ClaudeAgentOptions()
 
         allowed_tools = self._compute_allowed_tools(cfg)
@@ -294,7 +403,8 @@ class ChatBackend:
         if cfg.claude_max_turns is not None:
             options.max_turns = cfg.claude_max_turns
 
-        mcp_servers = self._build_mcp_servers(cfg)
+        # Build MCP servers (from config + file operations)
+        mcp_servers = self._build_mcp_servers(cfg, session_id)
         if mcp_servers:
             options.mcp_servers = mcp_servers
 
@@ -342,11 +452,34 @@ class ChatBackend:
         env["PATH"] = ":".join(path_parts) if path_parts else path_val
         return env
 
-    def _build_mcp_servers(self, cfg) -> Dict[str, Any]:
+    def _build_mcp_servers(self, cfg, session_id: str) -> Dict[str, Any]:
+        # Load config-based MCP servers
         servers = self._load_mcp_servers(cfg)
         if not servers:
-            return {}
+            servers = {}
         filtered = self._filter_mcp_servers(servers, cfg)
+
+        # Add file operations MCP server (always available for agents)
+        try:
+            file_ops_server = create_file_operations_mcp_server(self, session_id)
+            filtered["jujuchat-file-ops"] = file_ops_server
+            logger.info(
+                "Added file operations MCP server",
+                extra={
+                    "session_id": session_id,
+                    "server_name": "jujuchat-file-ops"
+                }
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to create file operations MCP server",
+                extra={
+                    "session_id": session_id,
+                    "error": str(e),
+                },
+                exc_info=True
+            )
+
         return filtered
 
     def _parse_csv(self, value: Optional[str]) -> List[str]:
@@ -384,6 +517,9 @@ class ChatBackend:
         additional = self._parse_csv(getattr(cfg, "claude_allowed_tools", None))
         if additional:
             allowed.extend(additional)
+
+        # Always allow file operations tools
+        allowed.append("mcp__jujuchat-file-ops__upload_file")
 
         seen = set()
         unique: List[str] = []

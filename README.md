@@ -15,6 +15,7 @@ JujuChat provides a flexible, adapter-based architecture for integrating Claude 
 - **MCP Integration**: Full support for Model Context Protocol servers
 - **Tool Management**: Granular control over allowed/disallowed tools
 - **Comprehensive Logging**: Two-layer logging system for both Claude interactions and adapter operations
+- **File Upload Abstraction**: Unified MCP tool for agents to upload files across any platform (Slack, RCS, etc.)
 
 ### Platform Adapters
 
@@ -350,6 +351,117 @@ You should see:
 - Check logs for errors
 - Ensure bot is invited to the channel (for channel mentions)
 
+## File Upload System for Agents
+
+JujuChat provides a unified file upload abstraction that allows Claude agents to upload files to any chat platform (Slack, RCS, etc.) without needing to know platform-specific details.
+
+### MCP Tool: `upload_file`
+
+The `upload_file` MCP tool is automatically available to all agents and allows them to upload files to the chat platform.
+
+**When agents use this tool:**
+- After creating a file (chart, report, document, image) to share with the user
+- When explicitly asked to send/upload/share a file
+- After processing media and needing to deliver results
+- When delivering output files to the user
+
+**Tool Usage Example (for agents):**
+
+```python
+# Agent creates a chart and uploads it
+# 1. Generate and save the chart (Write tool returns absolute path)
+path = write_file("/path/to/sales_data.png", chart_data)
+
+# 2. Upload the file using the MCP tool with absolute path
+upload_file(
+    file_path=path,  # Use absolute path from Write tool
+    title="Q4 Sales Chart",
+    comment="Here's the analysis you requested!"
+)
+
+# 3. Tell the user
+"I've created and uploaded the sales chart for you!"
+```
+
+**Common Agent Workflows:**
+
+1. **Generate → Upload → Inform**
+   - Agent creates file with Write tool (gets absolute path)
+   - Agent calls `upload_file("/absolute/path/to/report.pdf", title="Monthly Report")`
+   - Agent tells user file has been uploaded
+
+2. **Process → Save → Upload**
+   - User sends attachment
+   - Agent processes it (e.g., edits image)
+   - Agent saves result with Write tool (gets absolute path)
+   - Agent calls `upload_file("/absolute/path/to/edited.jpg", comment="Here's your edited photo!")`
+
+3. **Multiple Files**
+   - Agent generates multiple outputs
+   - Agent uploads each with separate `upload_file()` calls using absolute paths
+
+**File Path Resolution:**
+- **Absolute paths (recommended)**: `"/full/path/to/file.pdf"` - Used as-is, always works reliably
+- **Relative paths**: `"report.pdf"` - Resolved against current working directory (Slack: channel's `claude_initial_path`)
+- **Best practice**: Use absolute paths when creating files with Write tool, as it provides the full path
+
+**Platform-Specific Features:**
+- **Slack**: Supports `thread_ts` parameter for uploading to specific threads; uploads default to the active thread for the session if not provided
+- **RCS**: Standard uploads (additional parameters may be added)
+- Automatic routing based on session ID prefix
+
+**Security:**
+- File paths validated to prevent directory traversal attacks
+- File size and type restrictions enforced at adapter level
+
+### Programmatic API (for adapter developers)
+
+The Python API provides the same functionality:
+
+```python
+from jujuchat.core import ChatBackend
+
+# Upload a file for a session
+result = await backend.upload_file(
+    session_id="slack_D098GMJR48H",  # Automatically routes to Slack
+    file_path="report.pdf",
+    title="Monthly Report",
+    comment="Here's the report you requested!"
+)
+
+if result.success:
+    print(f"✅ {result.message}")
+    print(f"URL: {result.platform_data['file_url']}")
+else:
+    print(f"❌ {result.error}")
+```
+
+### Architecture
+
+The file upload system uses a protocol-based architecture:
+
+1. **MCP Tool Layer**: Agents invoke `upload_file` MCP tool
+2. **Core Routing Layer**: `ChatBackend.upload_file()` routes based on session ID prefix
+3. **Adapter Layer**: Platform-specific handlers (SlackUploadHandler, RCSUploadHandler, etc.)
+4. **Platform Layer**: Native platform APIs (Slack API, Twilio API, etc.)
+
+Each adapter registers a handler during initialization:
+
+```python
+# In Slack adapter initialization
+slack_handler = SlackUploadHandler(client=slack_client, bot_token=token)
+backend.register_upload_handler("slack", slack_handler)
+
+# In RCS adapter initialization
+rcs_handler = RCSUploadHandler(twilio_client=twilio)
+backend.register_upload_handler("rcs", rcs_handler)
+```
+
+Session IDs follow the pattern `{adapter_prefix}_{identifier}`:
+- Slack: `slack_D098GMJR48H` → Routes to SlackUploadHandler
+- RCS: `rcs_15551234567` → Routes to RCSUploadHandler
+- HTTP: `http_session123` → Routes to HTTPUploadHandler
+
 ## Unified Logging System
 
 JujuChat implements a sophisticated two-layer logging architecture:
@@ -405,7 +517,7 @@ Hello, can you help me?
 !schedule                  # Show scheduled messages status
 !schedule enable <name>    # Enable a scheduled message
 !schedule disable <name>   # Disable a scheduled message
-!sendfile <path ...>       # Upload file(s) from session attachments
+!sendfile <path ...>       # Upload file(s); use absolute paths or relative to working directory
 ```
 
 ### HTTP API
@@ -419,7 +531,7 @@ curl -X POST http://localhost:8811/chat \
     "session_id": "http_user123"
   }'
 
-# Upload an attachment
+# Upload an attachment (HTTP adapter only)
 curl -X POST http://localhost:8811/attachments \
   -F "file=@document.pdf" \
   -F "session_id=http_user123"

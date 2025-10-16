@@ -254,12 +254,24 @@ See `JujuChat-Migration-Tracker.md` for detailed migration progress.
 
 ## Best Practices
 
-1. **Use the logging system**: Always use `CoreLogger` for Claude interactions and `AdapterLogger` for adapter-specific events
+1. **Use the logging system**:
+   - Always use `CoreLogger` for Claude interactions and `AdapterLogger` for adapter-specific events
+   - When using standard Python `logging`, pass structured data via the `extra` parameter:
+     ```python
+     logger.info("File uploaded", extra={"session_id": session_id, "file_path": path})
+     ```
+   - Do NOT pass kwargs directly: ~~`logger.info("Message", session_id=id)`~~ (will raise TypeError)
+
 2. **Session management**: Let `ChatBackend` handle session lifecycle, don't manage Claude processes directly
+
 3. **Configuration**: Use the `ConfigProvider` protocol for all config access
+
 4. **Error handling**: Wrap Claude interactions in try/except and provide user-friendly error messages
+
 5. **Streaming**: Implement streaming responses for better UX (see Slack adapter for reference)
+
 6. **Security**: Never log sensitive data (tokens, credentials, personal information)
+
 7. **Testing**: Write tests for new features, especially for core backend changes
 
 ## File Locations Reference
