@@ -408,13 +408,13 @@ class ChatBackend:
         if mcp_servers:
             options.mcp_servers = mcp_servers
 
-        options.env = self._build_process_env(cfg)
+        options.env = self._build_process_env(cfg, session_id)
         options.include_partial_messages = True
         options.setting_sources = ["project", "local", "user"]
 
         return options
 
-    def _build_process_env(self, cfg) -> Dict[str, str]:
+    def _build_process_env(self, cfg, session_id: str) -> Dict[str, str]:
         env = os.environ.copy()
 
         projects = getattr(cfg, "obsidian_allowed_projects", None)
@@ -450,6 +450,16 @@ class ChatBackend:
             path_parts.append(brew_bin)
 
         env["PATH"] = ":".join(path_parts) if path_parts else path_val
+
+        # Pass through per-session user timezone if available (for local MCPs/tools)
+        try:
+            tz = self._session_meta.get(session_id, {}).get("user_timezone")
+            if tz:
+                env["JUJUCHAT_USER_TZ"] = tz
+                # Also set POSIX TZ; some libs honor this at process start
+                env["TZ"] = tz
+        except Exception:
+            pass
         return env
 
     def _build_mcp_servers(self, cfg, session_id: str) -> Dict[str, Any]:

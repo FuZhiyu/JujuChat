@@ -22,6 +22,7 @@ from .scheduler import AsyncScheduler
 from .exceptions import BotError, ConfigurationError, SlackError
 from .attachments import download_all_from_event_files, get_session_attachments_dir
 from .sender import upload_local_file
+from .upload_handler import SlackUploadHandler
 
 # Import core backend directly
 from ...core import ChatBackend, ConfigProvider
@@ -137,8 +138,9 @@ processor = None
 scheduler = None
 bot_user_id = None  # Will be set during initialization
 
-# User name caching to avoid rate limiting
+# User profile caching to avoid rate limiting
 USER_NAME_CACHE: Dict[str, tuple] = {}
+USER_TZ_CACHE: Dict[str, tuple] = {}
 USER_CACHE_TTL = 3600  # 1 hour
 
 async def _get_user_name(client, user_id: str) -> str:
@@ -172,6 +174,32 @@ async def _get_user_name(client, user_id: str) -> str:
         # Cache the fallback to avoid repeated API failures
         USER_NAME_CACHE[user_id] = (fallback_name, current_time)
         return fallback_name
+
+async def _get_user_timezone(client, user_id: str) -> Optional[str]:
+    """Get the user's IANA timezone (e.g., 'America/Chicago') using users_info, with caching."""
+    import time
+    now = time.time()
+    # Check cache first
+    if user_id in USER_TZ_CACHE:
+        tz_value, cached_time = USER_TZ_CACHE[user_id]
+        if now - cached_time < USER_CACHE_TTL:
+            return tz_value
+    try:
+        info = await client.users_info(user=user_id)
+        user = info.get("user", {})
+        tz = user.get("tz")
+        if not tz:
+            offset = user.get("tz_offset")
+            if isinstance(offset, int):
+                hours = int(offset // 3600)
+                minutes = int(abs(offset) % 3600 // 60)
+                sign = "+" if hours >= 0 else "-"
+                tz = f"UTC{sign}{abs(hours):02d}:{minutes:02d}"
+        USER_TZ_CACHE[user_id] = (tz, now)
+        return tz
+    except Exception:
+        USER_TZ_CACHE[user_id] = (None, now)
+        return None
 
 async def _get_thread_context(client, channel: str, thread_ts: str, bot_user_id: str) -> str:
     """
@@ -285,9 +313,17 @@ def initialize_components():
     # Create ChatBackend with Slack config provider
     config_provider = _SlackConfigProvider(config)
     claude_backend = ChatBackend(config_provider)
+
+    # Register Slack file upload handler
+    slack_upload_handler = SlackUploadHandler(
+        client=app.client,
+        bot_token=config.slack.bot_token
+    )
+    claude_backend.register_upload_handler("slack", slack_upload_handler)
+
     logger = BotLogger(config.app)
     processor = MessageProcessor(claude_backend, logger, config)
-    
+
     # Register event handlers
     register_event_handlers()
 
@@ -368,8 +404,44 @@ async def handle_dm_message(event, say, ack, client):
         print(f"Processing DM from {user_name} ({user_id}) in {channel}: {text[:100]}{'...' if len(text) > 100 else ''}", flush=True)
         
         try:
-            # Download any attachments
+            # Determine root thread ts and session id
+            root_ts = event.get('thread_ts') or event.get('ts')
             session_id = f"slack_{channel}"
+
+            # Real-time timezone handling (DM only): detect changes and refresh
+            user_tz = await _get_user_timezone(client, user_id)
+            try:
+                prev_meta = processor.claude.get_session_metadata(session_id)
+                prev_tz = prev_meta.get("user_timezone")
+            except Exception:
+                prev_tz = None
+
+            if user_tz and prev_tz and user_tz != prev_tz:
+                try:
+                    await say(f"⏱️ Detected timezone change to `{user_tz}`. Refreshing context…", thread_ts=root_ts)
+                except Exception:
+                    pass
+                try:
+                    await logger.log_message(user_id, channel, f"Timezone change: {prev_tz} -> {user_tz}", "timezone_change")
+                except Exception:
+                    pass
+                try:
+                    processor.claude.update_session_metadata(session_id, user_timezone=user_tz)
+                except Exception:
+                    pass
+                try:
+                    await processor.claude.reset_session(session_id)
+                except Exception:
+                    pass
+            else:
+                # Ensure metadata is populated for first-time or consistent tz
+                try:
+                    if user_tz:
+                        processor.claude.update_session_metadata(session_id, user_timezone=user_tz)
+                except Exception:
+                    pass
+
+            # Download any attachments
             max_mb = getattr(config.app, 'attachments_max_size_mb', None) or 25
             max_bytes = int(max_mb) * 1024 * 1024
             allowed_types = None
@@ -390,9 +462,9 @@ async def handle_dm_message(event, say, ack, client):
             await logger.log_message(user_id, channel, text, "incoming")
 
             # Process message with streaming support
-            root_ts = event.get('thread_ts') or event.get('ts')
             response, interim_ts = await processor.process_message(
                 text, channel, user_name, user_id,
+                user_timezone=user_tz,
                 attachment_paths=attachment_paths,
                 slack_client=client,
                 thread_ts=root_ts

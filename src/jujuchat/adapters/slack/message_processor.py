@@ -51,6 +51,7 @@ class MessageProcessor:
         channel: str,
         user_name: str,
         user_id: str = None,
+        user_timezone: Optional[str] = None,
         attachment_paths: Optional[List[str]] = None,
         slack_client = None,
         thread_ts: Optional[str] = None,
@@ -83,6 +84,12 @@ class MessageProcessor:
             # Process regular message through Claude
             session_id = f"slack_{channel}"
             
+            # Update session metadata with current thread for default tool behavior (e.g., uploads)
+            try:
+                self.claude.update_session_metadata(session_id, thread_ts=thread_ts, user_timezone=user_timezone)
+            except Exception:
+                pass
+
             # Update session timestamp
             timestamp = datetime.now().isoformat()
             self.conversation_sessions[session_id] = timestamp
@@ -94,7 +101,10 @@ class MessageProcessor:
                 paths = (paths or []) + cached.get('paths', [])
 
             # Add user context to message for Claude
-            contextual_message = f"User: {user_name}\nMessage: {text}"
+            if user_timezone:
+                contextual_message = f"User: {user_name}\nTimezone: {user_timezone}\nMessage: {text}"
+            else:
+                contextual_message = f"User: {user_name}\nMessage: {text}"
 
             # Handle attachment-only messages similar to HTTP server logic
             trimmed_text = (text or "").strip()
