@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+from datetime import datetime
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -392,7 +393,15 @@ class ChatBackend:
             raise ClaudeError(f"Working directory '{working_dir}' does not exist")
         options.cwd = str(working_dir)
 
-        options.system_prompt = cfg.system_prompt or DEFAULT_SYSTEM_PROMPT
+        # Build system prompt with today's date context
+        base_prompt = cfg.system_prompt or DEFAULT_SYSTEM_PROMPT
+        try:
+            today_str = datetime.now().strftime("%A, %B %d, %Y")
+            date_line = f"Today is {today_str};"
+            options.system_prompt = f"{date_line}\n\n{base_prompt}"
+        except Exception:
+            # Fallback gracefully if date formatting fails
+            options.system_prompt = base_prompt
 
         perm_mode = self._compute_permission_mode(cfg)
         if perm_mode:
