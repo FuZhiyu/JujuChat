@@ -292,15 +292,15 @@ class AsyncScheduler:
             
             # Send message through existing message processor infrastructure
             # This ensures it uses the same session management and Claude integration
-            response = await self.message_processor.process_message(
+            response_text, _ = await self.message_processor.process_message(
                 text=contextual_prompt,
                 channel=scheduled_msg.channel,
                 user_name=system_user_name,
                 user_id=system_user_id
             )
-            
+
             # Send the response to Slack
-            await self._send_to_slack(scheduled_msg.channel, response)
+            await self._send_to_slack(scheduled_msg.channel, response_text)
             
             # Update scheduling info
             scheduled_msg.last_run = datetime.now()
