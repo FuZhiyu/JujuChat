@@ -15,6 +15,8 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from jujuchat.core.config_providers import _find_claude_command
+
 @dataclass 
 class SlackConfig:
     """Slack API configuration settings."""
@@ -373,7 +375,7 @@ def _create_app_config(global_data: Dict[str, Any], config_dir: Path) -> AppConf
     return AppConfig(
         project_root=project_root,
         log_dir=log_dir,
-        claude_command=global_data.get('claude_command', 'claude'),
+        claude_command=global_data.get('claude_command') or _find_claude_command(),
         max_response_length=global_data.get('max_response_length', 3900),
         system_prompt=global_data.get('system_prompt'),
         claude_model=global_data.get('claude_model'),
@@ -518,11 +520,20 @@ def validate_config() -> None:
     """Validate that all required configuration is present."""
     try:
         config = get_config()
-        
+
         # Check if Claude command is available
-        import shutil
-        if not shutil.which(config.app.claude_command):
-            raise ValueError(f"Claude command '{config.app.claude_command}' not found in PATH")
+        claude_path = Path(config.app.claude_command).expanduser()
+        if claude_path.is_absolute():
+            # Absolute path - check file directly
+            if not claude_path.exists():
+                raise ValueError(f"Claude command '{config.app.claude_command}' not found")
+            if not os.access(claude_path, os.X_OK):
+                raise ValueError(f"Claude command '{config.app.claude_command}' is not executable")
+        else:
+            # Relative command - check PATH
+            import shutil
+            if not shutil.which(config.app.claude_command):
+                raise ValueError(f"Claude command '{config.app.claude_command}' not found in PATH")
             
         # Check if project root exists
         if not config.app.project_root.exists():

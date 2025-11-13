@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shutil
 import yaml
 from typing import Optional, Dict, Any
 from pathlib import Path
@@ -39,6 +41,36 @@ class IOSSessionConfig:
     history_dir: Path | None = None
     attachments_max_size_mb: Optional[int] = None
     attachments_allowed_types: Optional[str] = None
+
+
+def _find_claude_command() -> str:
+    """
+    Auto-detect Claude command in standard installation locations.
+
+    Checks in order:
+    2. 'claude' in PATH (global installation fallback)
+
+    Returns:
+        str: Path to Claude command
+
+    Raises:
+        ValueError: If Claude cannot be found in any standard location
+    """
+    # Check standard local installation
+    local_claude = Path.home() / ".claude" / "local" / "claude"
+    if local_claude.exists() and os.access(local_claude, os.X_OK):
+        return str(local_claude)
+
+    # Fall back to PATH search
+    if shutil.which("claude"):
+        return "claude"
+
+    # Not found anywhere
+    raise ValueError(
+        "Claude command not found. Please install Claude Code locally:\n"
+        "  See: https://docs.claude.com/claude-code\n"
+        "Expected location: ~/.claude/local/claude"
+    )
 
 
 class IOSConfigProvider:
@@ -146,7 +178,7 @@ class IOSConfigProvider:
             # Paths and commands
             project_root=project_root,
             log_dir=log_dir,
-            claude_command=config.get('claude_command', 'claude'),
+            claude_command=config.get('claude_command') or _find_claude_command(),
             
             # Claude settings
             max_response_length=config.get('max_response_length', 8000),

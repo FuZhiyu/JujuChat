@@ -175,12 +175,30 @@ class MessageProcessor:
             return (formatted_response, interim_message_ts)
             
         except ClaudeError as e:
+            import traceback
             error_msg = f"Claude Code error: {str(e)}"
-            await self._safe_log_error(user_id, channel, error_msg)
+            error_details = {
+                "error": str(e),
+                "type": type(e).__name__,
+                "traceback": traceback.format_exc(),
+                "session_id": f"slack_{channel}",
+                "user_id": user_id,
+            }
+            print(f"❌ ClaudeError in message processing:\n{traceback.format_exc()}")
+            await self._safe_log_error(user_id, channel, f"{error_msg}\n{error_details['traceback']}")
             return (f"I encountered an issue with Claude Code: {str(e)}", None)
         except Exception as e:
+            import traceback
             error_msg = f"Unexpected error in message processing: {str(e)}"
-            await self._safe_log_error(user_id, channel, error_msg)
+            error_details = {
+                "error": str(e),
+                "type": type(e).__name__,
+                "traceback": traceback.format_exc(),
+                "session_id": f"slack_{channel}",
+                "user_id": user_id,
+            }
+            print(f"❌ Unexpected error in message processing:\n{traceback.format_exc()}")
+            await self._safe_log_error(user_id, channel, f"{error_msg}\n{error_details['traceback']}")
             return (f"I encountered an unexpected error: {str(e)}", None)
         finally:
             # Clean up active stream tracking once processing completes or errors

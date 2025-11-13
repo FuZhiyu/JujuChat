@@ -344,20 +344,51 @@ class ChatBackend:
         signature = self._config_signature(cfg)
         existing = self._sessions.get(session_id)
         if existing and existing.config_signature == signature:
+            print(f"♻️  Reusing existing Claude session: {session_id}")
+            logger.debug("Reusing existing Claude session", extra={"session_id": session_id})
             return existing
 
         if existing:
+            print(f"🔄 Configuration changed for session {session_id}, recreating...")
+            logger.info("Configuration changed, recreating session", extra={"session_id": session_id})
             await self._teardown_session(session_id, existing)
 
         return await self._create_session(session_id, cfg, signature)
 
     async def _create_session(self, session_id: str, cfg, signature: str) -> SessionState:
+        import traceback
+
+        print(f"🔧 Creating new Claude session: {session_id}")
+        logger.info("Creating new Claude session", extra={"session_id": session_id})
+
         options = self._build_agent_options(cfg, session_id)
+
+        # Log the options being used
+        print(f"📋 Session options for {session_id}:")
+        print(f"   CLI path: {options.cli_path if hasattr(options, 'cli_path') else 'auto-detect'}")
+        print(f"   Working dir: {options.cwd if hasattr(options, 'cwd') else 'default'}")
+        print(f"   Model: {options.model if hasattr(options, 'model') else 'default'}")
+
         client = ClaudeSDKClient(options=options)
 
         try:
+            print(f"🔌 Connecting to Claude CLI for session {session_id}...")
+            logger.info("Attempting to connect to Claude CLI", extra={"session_id": session_id})
             await client.connect()
+            print(f"✅ Successfully connected to Claude CLI for session {session_id}")
         except ClaudeSDKError as exc:
+            print(f"❌ Failed to connect to Claude CLI for session {session_id}")
+            print(f"   Error: {exc}")
+            print(f"   Traceback:\n{traceback.format_exc()}")
+            logger.error(
+                "Failed to connect to Claude CLI",
+                extra={
+                    "session_id": session_id,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                exc_info=True,
+            )
             raise ClaudeError(f"Failed to start Claude Agent SDK session: {exc}") from exc
 
         logger.info("Started Claude session %s", session_id)
@@ -375,6 +406,28 @@ class ChatBackend:
 
     def _build_agent_options(self, cfg, session_id: str) -> ClaudeAgentOptions:
         options = ClaudeAgentOptions()
+
+        # Set CLI path from config if provided
+        claude_cmd = str(getattr(cfg, "claude_command", "")).strip()
+        if claude_cmd and "/" in claude_cmd:
+            cmd_path = Path(claude_cmd).expanduser().resolve()
+            options.cli_path = str(cmd_path)
+            print(f"🔍 [Session {session_id}] Using Claude CLI from config: {cmd_path}")
+            print(f"   Config value: {claude_cmd}")
+            logger.info(
+                "Using Claude CLI from config",
+                extra={
+                    "session_id": session_id,
+                    "cli_path": str(cmd_path),
+                    "config_value": claude_cmd,
+                }
+            )
+        else:
+            print(f"🔍 [Session {session_id}] No CLI path in config, SDK will auto-detect")
+            logger.info(
+                "No CLI path in config, SDK will auto-detect",
+                extra={"session_id": session_id}
+            )
 
         allowed_tools = self._compute_allowed_tools(cfg)
         if allowed_tools:
@@ -419,7 +472,9 @@ class ChatBackend:
 
         options.env = self._build_process_env(cfg, session_id)
         options.include_partial_messages = True
-        options.setting_sources = ["project", "local", "user"]
+        # Exclude "user" settings to avoid inheriting personal preferences like alwaysThinkingEnabled
+        # which can cause API errors when thinking parameter isn't properly configured
+        options.setting_sources = ["project", "local"]
 
         return options
 
